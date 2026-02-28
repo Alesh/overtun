@@ -11,7 +11,36 @@ authors = [
     { name = "Alesh", email = "@AleshDodry" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "paramiko>=4.0.0",
+]
 
 [tool.uv.build-backend]
 module-name = "overtun"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-env",
+    "ruff",
+]
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "ERROR"
+minversion = "6.0"
+testpaths = [
+    "tests",
+]
+addopts = [
+    "-ra",
+    "-q",
+]
+
+[tool.pytest_env]
+env_files = [".env"]
+
+[tool.ruff]
+line-length = 120
+indent-width = 4
+target-version = "py312"
