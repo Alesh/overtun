@@ -1,13 +1,9 @@
 import argparse
 
-from overtun.sshtools import SSHConnection
-
 
 def install(remote: str, port: int):
     """Installs the overtun on a remote server"""
-    with SSHConnection(remote, port) as client:
-        assert client
-        raise NotImplementedError
+    raise NotImplementedError
 
 
 def http_proxy(remote: str, port: int, proxy_port: int):

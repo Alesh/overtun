@@ -15,6 +15,11 @@ dependencies = [
     "paramiko>=4.0.0",
 ]
 
+[project.optional-dependencies]
+sock5http = [
+    "h11>=0.16.0",
+]
+
 [tool.uv.build-backend]
 module-name = "overtun"
 
