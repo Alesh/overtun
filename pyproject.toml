@@ -11,7 +11,39 @@ authors = [
     { name = "Alesh", email = "@AleshDodry" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "asyncssh>=2.22.0",
+]
 
 [tool.uv.build-backend]
 module-name = "overtun"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-env",
+    "ruff",
+]
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "ERROR"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+minversion = "6.0"
+testpaths = [
+    "tests",
+]
+addopts = [
+    "-ra",
+    "-q",
+]
+
+[tool.pytest_env]
+env_files = ["./tests/.env"]
+
+[tool.ruff]
+line-length = 120
+indent-width = 4
+target-version = "py312"

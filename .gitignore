@@ -12,3 +12,7 @@ wheels/
 # IDE
 .idea
 .vscode
+
+.env
+.ssh
+-*
