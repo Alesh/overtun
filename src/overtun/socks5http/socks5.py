@@ -46,11 +46,11 @@ class Socks5Protocol(asyncio.Protocol):
         self._started = False
 
         def handshaking_done(fut: asyncio.Future):
-            if not fut.exception():
+            if fut.done() and not (fut.cancelled() or fut.exception()):
                 self._send_connect(target_host, target_port)
 
         def connecting_done(fut: asyncio.Future):
-            if not fut.exception():
+            if fut.done() and not (fut.cancelled() or fut.exception()):
                 self._started = True
 
         self._handshaking_fut.add_done_callback(handshaking_done)

@@ -84,6 +84,8 @@ class ProxyProtocol(Protocol):
                     headers=[("Proxy-agent", "OverTun/socks5http")], status_code=200, reason=b"Connection established"
                 )
                 self._transport.write(self._h11_conn.send(resp))
+            except asyncio.CancelledError:
+                pass
             except Exception as exc:
                 self.socks5_failed(exc)
             finally:

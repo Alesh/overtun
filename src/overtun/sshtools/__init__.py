@@ -1,18 +1,19 @@
-import contextlib
 import os
+import typing as t
 from collections.abc import Callable
+from contextlib import contextmanager, AbstractContextManager
 
-from paramiko import PKey, RSAKey, ECDSAKey, Ed25519Key
+from paramiko import PKey
 from paramiko.client import SSHClient, AutoAddPolicy
 
+from ._types import SSHConnectParams, AllowHostIdentification
 from .methods import ensure_connection
-from .opts import SshOpts, make_ssh_opts, extract_ssh_params
-from .utils import get_default_key, get_pkey_from_pem
+
 
 __all__ = ["SSHConnection"]
 
 
-class SSHConnection(contextlib.AbstractContextManager[SSHClient, None]):
+class SSHConnection(AbstractContextManager[t.Self, None]):
     """
     SSH connection context manager
     """
@@ -20,49 +21,78 @@ class SSHConnection(contextlib.AbstractContextManager[SSHClient, None]):
     def __init__(
         self,
         hostname: str,
-        port: int | None = None,
-        username: str | None = None,
-        get_pkey: Callable[[str, str], PKey | None] | None = None,
-        get_password: Callable[[str, str], str | None] | None = None,
-        default_key_type: RSAKey | ECDSAKey | Ed25519Key | None = None,
-        ssh_opts: SshOpts | None = None,
+        *,
+        get_pkey: Callable[[str, str], PKey] | None = None,
+        get_password: Callable[[str, str], str] | None = None,
+        allow_change_host_identification: bool = False,
+        allow_create_host_identification: bool = True,
+        **kwargs: t.Unpack[SSHConnectParams],
     ):
+        username = os.getenv("USER", "root")
+        if "@" in hostname:
+            username, hostname = hostname.split("@")
         self._hostname = hostname
-        self._port = int(port or 22)
-        self._username = username or os.getenv("USER")
-        self._default_key_type = default_key_type or Ed25519Key
-        self._ssh_opts = make_ssh_opts(**(ssh_opts or {}))
+        self._client: SSHClient | None
+        self._allow_host_identification = tuple(
+            filter(
+                lambda a: a,
+                [
+                    AllowHostIdentification.CHANGE if allow_change_host_identification else None,
+                    AllowHostIdentification.CREATE if allow_create_host_identification else None,
+                ],
+            )
+        )
 
-        def default_get_pkey(username_, host_) -> PKey | None:
-            assert username_ == username and host_ == hostname
-            return os.environ.get("PRIVATE_KEY", get_default_key())
+        self._get_pkey = get_pkey
+        if get_pkey is None and ("pkey" in kwargs or "key_filename" in kwargs):
+            if "key_filename" in kwargs:
+                pkey = PKey.from_path(kwargs.pop("key_filename"), kwargs.pop("passphrase", None))
+            else:
+                pkey = kwargs.pop("pkey", None)
+            self._get_pkey = lambda *args: pkey
 
-        def default_get_password(username_, host_) -> str | None:
-            assert username_ == username and host_ == hostname
-            return os.environ.get("PASSWORD")
+        self._get_password = get_password
+        if get_password is None and "password" in kwargs:
+            password = kwargs.pop("password")
+            self._get_password = lambda *args: password
 
-        self._get_pkey = get_pkey or default_get_pkey
-        self._get_password = get_password or default_get_password
-        self._client: SSHClient | None = None
+        self._params = dict(
+            hostname=hostname,
+            username=username,
+            port=kwargs.get("port", 22),
+            look_for_keys=kwargs.pop("look_for_keys", False),
+            allow_agent=kwargs.pop("allow_agent", False),
+        )
 
-    def __enter__(self) -> SSHClient:
-        if result := ensure_connection(
-            self._username,
-            self._hostname,
-            self._port,
-            self._get_pkey,
-            self._get_password,
-            default_key_type=self._default_key_type,
-            ssh_opts=self._ssh_opts,
-        ):
-            pkey_pem, _ = result
-            if pkey := get_pkey_from_pem(pkey_pem):
-                self._client = SSHClient()
-                self._client.set_missing_host_key_policy(AutoAddPolicy())
-                ssh_params = dict(extract_ssh_params(self._ssh_opts), pkey=pkey)
-                self._client.connect(hostname=self._hostname, port=self._port, username=self._username, **ssh_params)
-                return self._client
-        raise RuntimeError("Cannot create SSH connection.")
+    def __enter__(self):
+        self._client = SSHClient()
+        return self
 
-    def __exit__(self, *exc_info):
-        pass
+    def __exit__(self, exc_type, exc_value, traceback, /):
+        self._client.close()
+        self._client = None
+
+    def connect(self, **kwargs: t.Unpack[SSHConnectParams]) -> AbstractContextManager[SSHClient, None]:
+        if self._client is None:
+            raise ValueError("SSH connection context is required")
+
+        @contextmanager
+        def connect_ctx():
+            try:
+                if params := ensure_connection(
+                    get_pkey=self._get_pkey,
+                    get_password=self._get_password,
+                    allow_host_identification=self._allow_host_identification,
+                    **self._params,
+                ):
+                    if AllowHostIdentification.CREATE in self._allow_host_identification:
+                        self._client.set_missing_host_key_policy(AutoAddPolicy())
+                    params = dict(**self._params, **kwargs, **params)
+                else:
+                    raise ValueError("Fail to check SSH connection")
+                self._client.connect(self._hostname, **params)
+                yield self._client
+            except Exception as e:
+                yield e
+
+        return connect_ctx()

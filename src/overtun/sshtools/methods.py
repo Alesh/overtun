@@ -1,61 +1,31 @@
 import socket
 from collections.abc import Callable
 
+from paramiko import PKey, SSHException, RejectPolicy, BadHostKeyException, SSHClient, AuthenticationException
 
-from paramiko import (
-    RSAKey,
-    ECDSAKey,
-    Ed25519Key,
-    SSHException,
-    SSHClient,
-    AutoAddPolicy,
-    BadHostKeyException,
-    AuthenticationException,
-)
-from paramiko.client import RejectPolicy
-from paramiko.pkey import PKey
-
-from .utils import logger, generate_key, deploy_public_key, get_pem_from_pkey
-from .opts import SshOpts, make_ssh_opts, extract_ssh_params
+from ._types import AllowHostIdentification, SSHConnectParams
+from .utils import logger
 
 
 def ensure_connection(
-    username: str,
     hostname: str,
-    port: int | None = None,
-    get_priv_key: Callable[[str, str], PKey | None] | None = None,
-    get_password: Callable[[str, str], str | None] | None = None,
-    command: str | None = None,
-    default_key_type: RSAKey | ECDSAKey | Ed25519Key | None = None,
-    ssh_opts: SshOpts | None = None,
-) -> tuple[str, str] | None:
+    port: int,
+    username: str,
+    *,
+    get_pkey: Callable[[str, str], PKey] = None,
+    get_password: Callable[[str, str], str] = None,
+    allow_host_identification: tuple[AllowHostIdentification, ...] = None,
+    **kwargs,
+) -> SSHConnectParams | None:
     """
-    Verify SSH connection to a remote host.
-
-    Args:
-        username: Username for SSH connection.
-        hostname: Hostname or IP address.
-        port: Connection port, defaults to 22.
-        get_priv_key: Callback that returns user's private key for the (user, host) pair if defined.
-        get_password: Callback that returns user's password for the (user, host) pair if defined.
-        command: Command to execute on the remote host after successful connection.
-        default_key_type: Default generated key type, Ed25519Key if not specified.
-        ssh_opts: SSH connection parameters.
-    Returns:
-        Tuple: PEM representation of the private key used for connection, console output result
-        of command execution on the remote host.
+    Checks and, if necessary, prepares an SSH connection to a remote host.
     """
-    port = int(port or 22)
-    command = command or "true"
-    default_key_type = default_key_type or Ed25519Key
-    ssh_opts = make_ssh_opts(**(ssh_opts or {}))
 
     # Load or create keys
+    pkey = None
     try:
-        if pkey := (get_priv_key and get_priv_key(username, hostname)):
-            pass
-        else:
-            pkey = generate_key(default_key_type)
+        if get_pkey:
+            pkey = get_pkey(username, hostname)
     except SSHException as e:
         logger.warning(f"Failed to get private key; {e}")
         return None
@@ -69,16 +39,16 @@ def ensure_connection(
     client.set_missing_host_key_policy(OurPolicy())
     client.load_system_host_keys()
     try:
-        ssh_params = dict(extract_ssh_params(ssh_opts), pkey=pkey)
+        params = dict(kwargs, pkey=pkey)
         while True:
             try:
-                client.connect(hostname=hostname, port=port, username=username, **ssh_params)
+                client.connect(hostname=hostname, port=port, username=username, **params)
                 break  # success
             except BadHostKeyException as e:
                 if isinstance(e.expected_key, PKey):
                     expected = f"{e.expected_key.get_name()} {e.expected_key.get_base64()}"
                     message = f"Remote host {hostname} identification changed, expected: {expected}"
-                    if ssh_opts.get("allow_change_host_identification"):
+                    if AllowHostIdentification.CHANGE in allow_host_identification:
                         logger.warning(f"{message}")
                         raise NotImplementedError(
                             "Automatic key replacement is unavailable. "
@@ -86,7 +56,7 @@ def ensure_connection(
                         )
                 else:
                     message = f"Remote host {hostname} identification not found in known_hosts"
-                    if ssh_opts.get("allow_create_host_identification"):
+                    if AllowHostIdentification.CREATE in allow_host_identification:
                         logger.warning(f"{message}")
                         client._host_keys.add(hostname, e.key.get_name(), e.key)
                         if client._host_keys_filename is not None:
@@ -95,11 +65,11 @@ def ensure_connection(
                 logger.error(f"{message}")
                 return None
             except AuthenticationException:
-                if "password" not in ssh_params:
+                if "password" not in params:
                     message = f"Key authentication failed for {username}@{hostname}"
                     if password := get_password(username, hostname):
                         logger.warning(f"{message}; password will be used.")
-                        ssh_params = dict(extract_ssh_params(ssh_opts), password=password)
+                        params = dict(kwargs, password=password)
                         continue
                     logger.error(f"{message}, and password isn't defined")
                     return None
@@ -109,31 +79,18 @@ def ensure_connection(
             except (SSHException, socket.error) as e:
                 logger.error(f"Failed to connect to {username}@{hostname}; {e}")
                 return None
-
-        if "password" in ssh_params:
-            # Connected with password; public key will be placed in ~/.ssh/authorized_keys on the remote host.
-            if not deploy_public_key(client, pkey):
-                logger.error(f"Failed to deploy public key for {username}@{hostname}")
-                return None
-            else:
-                logger.info(f"Added public key for {username}@{hostname} to remote `~/.ssh/authorized_keys`")
+        return SSHConnectParams(**params)
     finally:
         client.close()
 
-    # Final check
-    client = SSHClient()
-    client.set_missing_host_key_policy(AutoAddPolicy())
-    ssh_params = dict(extract_ssh_params(ssh_opts), pkey=pkey)
-    try:
-        client.connect(hostname=hostname, port=port, username=username, **ssh_params)
-        stdin, stdout, stderr = client.exec_command(command)
-        output = stdout.read().decode("utf-8").strip()
-        error = stderr.read().decode("utf-8").strip()
-        output = error if error else output
-        private_key_pem = get_pem_from_pkey(pkey)
-        return private_key_pem, output
-    except (SSHException, socket.error) as e:
-        logger.error(f"Final check failed for {username}@{hostname}; {e}")
-        return None
-    finally:
-        client.close()
+
+def deploy_public_key(client: SSHClient, PKey) -> bool:
+    """Deploy a public key to the ~/.ssh/authorized_keys on remote host."""
+    raise NotImplementedError
+    # if "password" in params:
+    #     # Connected with password; public key will be placed in ~/.ssh/authorized_keys on the remote host.
+    #     if not deploy_public_key(client, pkey):
+    #         logger.error(f"Failed to deploy public key for {username}@{hostname}")
+    #         return None
+    #     else:
+    #         logger.info(f"Added public key for {username}@{hostname} to remote `~/.ssh/authorized_keys`")
