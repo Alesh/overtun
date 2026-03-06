@@ -11,7 +11,7 @@ from typing_extensions import Awaitable
 from overtun.utils import _get_result
 
 logger = logging.getLogger(":".join(__name__.split(".")))
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 type Hostname = str
 type Username = str

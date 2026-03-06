@@ -5,12 +5,12 @@ from asyncio import Protocol, Transport
 from collections.abc import Callable
 from typing import Coroutine
 
+import asyncssh
 import h11
-
-type TargetConnect = Callable[[Transport, str, int], Coroutine[t.Any, t.Any, Transport]]
+from asyncssh import DataType, SSHClientConnection, SSHTCPChannel
 
 logger = logging.getLogger(":".join(__name__.split(".")))
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 
 class ProxyProtocol(Protocol):
@@ -18,17 +18,17 @@ class ProxyProtocol(Protocol):
     HTTP CONNECT Proxy protocol for the client side.
     """
 
-    def __init__(self, target_connect: TargetConnect):
+    def __init__(self, target_connect: Callable[[Transport, str, int], Coroutine[t.Any, t.Any, SSHTCPChannel]]):
         """
         Constructor
 
         Args:
-            target_connect: SOCKS5 asyncore connection factory.
+            target_connect: Target session factory.
         """
         self._target_connect = target_connect
         self._tasks: set[asyncio.Task] = set()
         self._h11_conn = h11.Connection(our_role=h11.SERVER)
-        self._socks5_transport: Transport | None = None
+        self._target_channel: SSHTCPChannel | None = None
         self._transport: Transport | None = None
 
     def connection_made(self, transport: Transport):
@@ -37,15 +37,15 @@ class ProxyProtocol(Protocol):
 
     def data_received(self, data: bytes):
         """`asyncio.Protocol` Data has been received."""
-        if self._socks5_transport is not None:
-            self._socks5_transport.write(data)
+        if self._target_channel is not None:
+            self._target_channel.write(data)
         else:
             self._h11_conn.receive_data(data)
             self._process_events()
 
-    def target_connection_success(self, socks5_transport: Transport):
+    def target_connection_success(self, target_channel: SSHTCPChannel):
         """Target connection has been successfully established."""
-        self._socks5_transport = socks5_transport
+        self._target_channel = target_channel
 
     def target_connection_failed(self, exc: Exception):
         """Target connection has been failed."""
@@ -59,8 +59,8 @@ class ProxyProtocol(Protocol):
 
     def connection_lost(self, exc: Exception):
         """`asyncio.Protocol` Connection has been lost."""
-        if self._socks5_transport is not None:
-            self._socks5_transport.close()
+        if self._target_channel is not None:
+            self._target_channel.close()
 
     def _process_events(self):
         request = None
@@ -108,3 +108,55 @@ class ProxyProtocol(Protocol):
                 self._transport.write(self._h11_conn.send(resp))
                 self._transport.write(self._h11_conn.send(h11.EndOfMessage()))
                 self._transport.close()
+
+
+class TargetSession(asyncssh.SSHTCPSession):
+    """
+    SSH Direct TCP session for the target side.
+    """
+
+    def __init__(self, proxy_transport: Transport):
+        self._proxy_transport = proxy_transport
+        self._chan: SSHTCPChannel[bytes] | None = None
+
+    def connection_made(self, chan: SSHTCPChannel[bytes]) -> None:
+        logger.debug(f"Tunnel established; {chan.get_extra_info('remote_peername', ())}")
+        self._chan = chan
+
+    def data_received(self, data: bytes, datatype: DataType) -> None:
+        """Data has been received."""
+        self._proxy_transport.write(data)
+
+    def connection_lost(self, exc: Exception):
+        """Connection has been lost."""
+        logger.debug(f"Tunnel closed; {self._chan.get_extra_info('remote_peername', ())}")
+        self._proxy_transport.close()
+
+
+async def create_server(cc: SSHClientConnection, proxy_host: str, proxy_port: int) -> asyncio.Server:
+    """
+    Creates the HTTP CONNECT proxy server that provides connection
+    to a network resource via a SSH2 direct TCP connection.
+
+    Args:
+        cc: SSHClientConnection object.
+        proxy_host: The hostname of the proxy server.
+        proxy_port: The port of the proxy server.
+    """
+    loop = asyncio.get_running_loop()
+
+    async def target_connector(proxy_transport: Transport, target_host: str, target_port: int):
+        try:
+            channel, session = await cc.create_connection(
+                lambda: TargetSession(proxy_transport), target_host, target_port
+            )
+            return channel
+        except Exception as exc:
+            raise ConnectionError(f"Failed to create tunnel to {target_host}:{target_port}; {exc}")
+
+    logger.info(f"Creating HTTP CONNECT proxy server on: {proxy_host}:{proxy_port}")
+    return await loop.create_server(
+        lambda: ProxyProtocol(target_connector),
+        proxy_host,
+        proxy_port,
+    )
