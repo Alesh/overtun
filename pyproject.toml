@@ -11,13 +11,16 @@ authors = [
     { name = "Alesh", email = "alexey.poryadin@xmail.ru" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "h11>=0.16.0",
+]
 
 [tool.uv.build-backend]
 module-name = "overtun"
 
 [dependency-groups]
 dev = [
+    "httpx",
     "pytest",
     "pytest-asyncio",
     "pytest-env",
