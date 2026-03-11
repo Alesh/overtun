@@ -18,6 +18,7 @@ module-name = "overtun"
 
 [dependency-groups]
 dev = [
+    "httpx",
     "pytest",
     "pytest-asyncio",
     "pytest-env",
