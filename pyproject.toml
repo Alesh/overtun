@@ -5,7 +5,7 @@ build-backend = "uv_build"
 [project]
 name = "OverTun"
 version = "0.1.0"
-description = "Tools for building network tunnels."
+description = "The module includes components for building asynchronous network tunnels and typical solution examples."
 readme = "README.md"
 authors = [
     { name = "Alesh", email = "alexey.poryadin@xmail.ru" }
@@ -14,10 +14,11 @@ requires-python = ">=3.12"
 dependencies = []
 
 [tool.uv.build-backend]
-module-name = "overtun"
+namespace = true
 
 [dependency-groups]
 dev = [
+    "httpx",
     "pytest",
     "pytest-asyncio",
     "pytest-env",
