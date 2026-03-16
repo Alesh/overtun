@@ -1,81 +1,25 @@
 import asyncio
-import struct
+import typing as t
 from asyncio import Transport
 
 import httpx
 import pytest
 
 import overtun.base
-from overtun.base import Target, TargetDecoder
+from overtun.base import Target
+from overtun.utils.tlsex import TLSRecord, TLSMessage
+from overtun.utils.tlsex.extensions import TLSExtension, ServerName
 
 
-class SNIDecoder(TargetDecoder):
-    def __init__(self, port: int):
-        self._port = port
-
-    def __call__(self, data: bytes) -> Target | None:
-        """
-        Разбирает пакет TLS Client Hello. Извлекает SNI. Соответствует интерфейсу `overtun.decoders.Decoder`.
-        """
-        if len(data) < 5:
-            return None
-        elif data[0] != 0x16:
-            raise ValueError("Not a TLS Handshake (Not HTTPS)")
-
-        record_len = struct.unpack("!H", data[3:5])[0]
-        if len(data) < record_len + 5:
-            return None
-        elif data[5] != 0x01:
+def sni_extractor(data: bytes, port: int = 433) -> Target | None:
+    if record := TLSRecord.load(data):
+        if record.message.type != TLSMessage.Type.ClientHello:
             raise ValueError("Not a TLS Client Hello")
-
-        # Пропускаем TSL Head (5), Handshake Header (4), Version (2), Random (32)
-        ptr = 5 + 4 + 2 + 32
-
-        # Session ID
-        if len(data) < ptr + 1:
-            return None
-        session_id_len = data[ptr]
-        ptr += 1 + session_id_len
-
-        # Cipher Suites
-        if len(data) < ptr + 2:
-            return None
-        cipher_suites_len = struct.unpack("!H", data[ptr : ptr + 2])[0]
-        ptr += 2 + cipher_suites_len
-
-        # Compression Methods
-        if len(data) < ptr + 1:
-            return None
-        compression_len = data[ptr]
-        ptr += 1 + compression_len
-
-        # Extensions
-        if len(data) < ptr + 2:
-            # Если пакет закончился здесь, значит расширений (и SNI) нет
-            raise LookupError("No extensions found (No SNI)")
-
-        extensions_len = struct.unpack("!H", data[ptr : ptr + 2])[0]
-        ptr += 2
-
-        end_ptr = ptr + extensions_len
-        if len(data) < end_ptr:
-            return None
-
-        while ptr + 4 <= end_ptr:
-            ext_type, ext_len = struct.unpack("!HH", data[ptr : ptr + 4])
-            ptr += 4
-
-            if ext_type == 0:  # SNI Extension
-                # Структура: SNI List Len(2), Type(1), Name Len(2)
-                ptr += 2 + 1
-                name_len = struct.unpack("!H", data[ptr : ptr + 2])[0]
-                ptr += 2
-                host = data[ptr : ptr + name_len].decode("utf-8")
-                return Target(host, self._port)
-
-            ptr += ext_len
-
+        if TLSExtension.Type.ServerName in record.message.extensions:
+            sni = t.cast(ServerName, record.message.extensions[TLSExtension.Type.ServerName])
+            return Target(sni.hostname, port)
         raise LookupError("SNI extension not found in TLS Handshake")
+    return None
 
 
 async def create_endpoint(bag: list, endpoint_port: int) -> asyncio.Server:
@@ -88,7 +32,7 @@ async def create_endpoint(bag: list, endpoint_port: int) -> asyncio.Server:
 
     class Protocol(overtun.base.DispatcherProtocol):
         def __init__(self, port: int = 443):
-            super().__init__(SNIDecoder(port), target_connector)
+            super().__init__(lambda data: sni_extractor(data, port), target_connector)
 
     return await loop.create_server(Protocol, "127.0.0.1", endpoint_port)
 
@@ -111,7 +55,7 @@ async def create_proxy(bag: list, proxy_port: int, endpoint: Target) -> asyncio.
 
     class Protocol(overtun.base.DispatcherProtocol):
         def __init__(self, port: int = 443):
-            super().__init__(SNIDecoder(port), target_connector)
+            super().__init__(lambda data: sni_extractor(data, port), target_connector)
 
     return await loop.create_server(Protocol, "127.0.0.1", proxy_port)
 

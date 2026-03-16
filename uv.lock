@@ -100,6 +100,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-env" },
     { name = "ruff" },
+    { name = "tls-parser" },
 ]
 
 [package.metadata]
@@ -111,6 +112,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-env" },
     { name = "ruff" },
+    { name = "tls-parser", git = "https://github.com/nabla-c0d3/tls_parser.git" },
 ]
 
 [[package]]
@@ -215,6 +217,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b8/00/bf077a505b4e649bdd3c47ff8ec967735ce2544c8e4a43aba42ee9bf935d/ruff-0.15.5-py3-none-win_amd64.whl", hash = "sha256:821d41c5fa9e19117616c35eaa3f4b75046ec76c65e7ae20a333e9a8696bc7fe", size = 11678972, upload-time = "2026-03-05T20:06:45.379Z" },
     { url = "https://files.pythonhosted.org/packages/fe/4e/cd76eca6db6115604b7626668e891c9dd03330384082e33662fb0f113614/ruff-0.15.5-py3-none-win_arm64.whl", hash = "sha256:b498d1c60d2fe5c10c45ec3f698901065772730b411f164ae270bb6bfcc4740b", size = 10965572, upload-time = "2026-03-05T20:06:16.984Z" },
 ]
+
+[[package]]
+name = "tls-parser"
+version = "2.0.2"
+source = { git = "https://github.com/nabla-c0d3/tls_parser.git#c2d4729ba2ceba48aabb0c3064da0da914f77238" }
 
 [[package]]
 name = "typing-extensions"
