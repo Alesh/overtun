@@ -1,7 +1,7 @@
 import pytest
 
-from overtun.utils.tlsex import TLSRecord, TLSMessage
-from overtun.utils.tlsex.extensions import TLSExtension
+from tlsex import TLSRecord, TLSMessage
+from tlsex.extensions import TLSExtension
 
 
 @pytest.fixture
