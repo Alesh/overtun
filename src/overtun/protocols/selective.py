@@ -55,12 +55,12 @@ class SelectiveProtocol(proxy.IncomingProtocol):
         """
         if ai := self._address_register(target):
             if ai.allow:  # проксирование через туннель
-                return self.create_tunnel_connection(self._outlet_address, target)
+                return self.create_tunnel_connection(self._outlet_address, ai)
         else:  # проксирование на месте
             return super().create_target_connection(target)
         return None
 
-    def create_tunnel_connection(self, outlet: Address, target: Address) -> asyncio.Task[OutcomingProtocol]:
+    def create_tunnel_connection(self, outlet: Address, target: AddressInfo) -> asyncio.Task[OutcomingProtocol]:
         """
         Создает туннельное соединение к целевому адресу.
 
