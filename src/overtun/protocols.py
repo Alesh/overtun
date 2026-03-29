@@ -1,13 +1,13 @@
 import asyncio
 import logging
-from asyncio import Transport, Task, Future
+from asyncio import Transport, Task
 from collections.abc import Buffer, Callable
 from enum import Enum
 from logging import Logger
 from typing import Coroutine
 
 from overtun.intyperr import Address
-from tlsex import TLSRecord, TLSMessage, TLSExtension
+from overtun.utils.extractors import sni_extractor
 
 
 class Protocol(asyncio.Protocol):
@@ -107,7 +107,7 @@ class ProxyProtocol(Protocol):
 
     def __init__(
         self,
-        outcoming_factory: Callable[[Protocol, Address, ProxyMode], Coroutine[None, None, OutcomingProtocol | None]],
+        outcoming_factory: Callable[[Protocol, Address], Coroutine[None, None, OutcomingProtocol | None]],
         logger: Logger = None,
     ):
         super().__init__(logger)
@@ -117,19 +117,24 @@ class ProxyProtocol(Protocol):
         self.target: Address | None = None
         self._buffer = b""
 
-    def _outcoming_done(self, task: Task[OutcomingProtocol], mode: ProxyMode):
+    def _outcoming_done(
+        self, task: Task[OutcomingProtocol], mode: ProxyMode, on_success: Callable[..., None] | None = None
+    ):
         try:
             if outcoming := task.result():
                 self.outcoming = outcoming
                 self.mode = mode
+                if on_success:
+                    on_success()
             else:
-                raise ConnectionError(f"Taget banned")
+                raise ConnectionError("Taget banned")
         except Exception as exc:
             msg = f"Outcoming connection {self.target} failed; {exc}"
-            if not isinstance(exc, ConnectionError) and self.logger.isEnabledFor(logging.DEBUG):
+            if self.logger.isEnabledFor(logging.DEBUG):
                 self.logger.exception(msg)
             else:
                 self.logger.debug(msg)
+            self.transport.write_eof()
 
     def data_received(self, data: bytes):
         """Получены данные из входящего подключения."""
@@ -151,25 +156,26 @@ class ProxyProtocol(Protocol):
                     [a.decode("ascii") for a in self._buffer.split(b"\r\n") if a][0].split(" ")[1]
                 )
                 self._buffer = b""
-                self._outcoming_task = asyncio.create_task(
-                    self._outcoming_factory(self, self.target, ProxyMode.HTTP_CONNECT)
+                self._outcoming_task = asyncio.create_task(self._outcoming_factory(self, self.target))
+                self._outcoming_task.add_done_callback(
+                    lambda task: self._outcoming_done(
+                        task,
+                        ProxyMode.HTTP_CONNECT,
+                        lambda: self.transport.write(b"HTTP/1.0 200 OK\r\n\r\n"),
+                    )
                 )
-                self._outcoming_task.add_done_callback(lambda task: self._outcoming_done(task, ProxyMode.HTTP_CONNECT))
-                self._outcoming_task.add_done_callback(lambda _: self.transport.write(b"HTTP/1.0 200 OK\r\n\r\n"))
 
-            elif record := TLSRecord.load(self._buffer):
+            elif target := sni_extractor(self._buffer, 443):
                 # Transparent HTTPS
-                if record.message.type == TLSMessage.Type.ClientHello:
-                    if TLSExtension.Type.ServerName in record.message.extensions:
-                        sni = record.message.extensions[TLSExtension.Type.ServerName].hostname
-                        self.target = Address.from_(sni) if ":" in sni else Address.from_(sni, 443)
-                        self._outcoming_task = asyncio.create_task(
-                            self._outcoming_factory(self, self.target, ProxyMode.HTTPS_TRANSPARENT)
-                        )
-                        self._outcoming_task.add_done_callback(
-                            lambda task: self._outcoming_done(task, ProxyMode.HTTPS_TRANSPARENT)
-                        )
-                        self._outcoming_task.add_done_callback(lambda _: self.outcoming_data(memoryview(self._buffer)))
+                self.target = target
+                self._outcoming_task = asyncio.create_task(self._outcoming_factory(self, self.target))
+                self._outcoming_task.add_done_callback(
+                    lambda task: self._outcoming_done(
+                        task,
+                        ProxyMode.HTTPS_TRANSPARENT,
+                        lambda: self.outcoming_data(memoryview(self._buffer)),
+                    )
+                )
 
     def outcoming_data(self, data: memoryview):
         """Получены данные для пересылки в исходящее соединение."""
