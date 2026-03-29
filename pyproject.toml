@@ -44,6 +44,6 @@ addopts = [
 env_files = ["./tests/.env"]
 
 [tool.ruff]
-line-length = 120
+line-length = 100
 indent-width = 4
 target-version = "py312"
