@@ -68,7 +68,7 @@ class ClientHello(TLSMessage):
         ptr = ptr + 2
         end_ptr = ptr + length
         while ptr + 4 <= end_ptr:
-            key = TLSExtension.Type(mv[ptr : ptr + 2]) if mv[ptr : ptr + 2] in TLSExtension.Type else mv[ptr : ptr + 2]
+            key = TLSExtension.Type(mv[ptr : ptr + 2]) if mv[ptr : ptr + 2] in TLSExtension.Type else int.from_bytes(mv[ptr : ptr + 2])
             length = struct.unpack("!H", mv[ptr + 2 : ptr + 4])[0]
             self.__extensions[key] = TLSExtension.select(mv[ptr : ptr + 4 + length])
             ptr += 4 + length

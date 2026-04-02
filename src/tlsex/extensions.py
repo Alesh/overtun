@@ -64,17 +64,20 @@ class TLSExtension:
     @property
     def type(self):
         """Тип сообщения."""
-        return TLSExtension.Type(self._mv[0:2])
+        return TLSExtension.Type(self._mv[0:2]) if self._mv[0:2] in TLSExtension.Type else int.from_bytes(self._mv[0:2])
 
     @staticmethod
     def select(mv: memoryview) -> "TLSExtension":
         """На основе данных создает экземпляр класса расширения."""
-        message_type = TLSExtension.Type(mv[0:2])
-        match message_type:
-            case TLSExtension.Type.ServerName:
-                return ServerName(mv)
-            case _:
-                return TLSExtension(mv)
+        if mv[0:2] in TLSExtension.Type:
+            extension_type = TLSExtension.Type(mv[0:2])
+            match extension_type:
+                case TLSExtension.Type.ServerName:
+                    return ServerName(mv)
+                case _:
+                    return TLSExtension(mv)
+        else:
+            return TLSExtension(mv)
 
 
 class ServerName(TLSExtension):

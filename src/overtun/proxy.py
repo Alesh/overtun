@@ -27,7 +27,7 @@ class ConnectionRule(int, Enum):
 
 class TargetRule(t.NamedTuple):
     """
-    Информация о
+    Правила подключения к целевому адресу
     """
 
     target: Address
