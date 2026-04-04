@@ -1,5 +1,6 @@
 import re
 import typing as t
+from enum import Enum
 from ipaddress import IPv4Address, IPv6Address, AddressValueError
 
 DOMAIN_RE = re.compile(r"(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}$)")
@@ -52,3 +53,13 @@ class Address(t.NamedTuple):
         except (ValueError, TypeError, AddressValueError) as exc:
             raise ValueError("Wrong value") from exc
         raise TypeError("Wrong type")
+
+
+class TrafficRule(int, Enum):
+    DROP = 0
+    DIRECT = 1
+    TUNNEL = 2
+
+
+class TargetTraffic(t.NamedTuple):
+    rule: TrafficRule

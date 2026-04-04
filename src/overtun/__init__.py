@@ -2,8 +2,8 @@ import asyncio
 import typing as t
 from collections.abc import Callable
 
-from .primitives import Address
-from .intyperr import OutcomingTransport
+from .primitives import Address, TargetTraffic, TrafficRule
+from .intyperr import OutcomingTransport, TargetRegistry
 from .protocols import ProxyProtocol
 
 __all__ = ("Address", "ProxyProtocol")
@@ -36,12 +36,14 @@ async def create_server(
 
 def make_protocol_factory(
     outlet_address: Address | None = None,
+    traffic_selector: TargetRegistry[TargetTraffic] | None = None,
 ) -> Callable[[], ProxyProtocol]:
     """
     Функция возвращает параметр-настроенную фабрику прокси `overtun.ProxyProtocol`.
 
     Args:
         outlet_address: Адрес выхода туннеля, если задан включает на сервере возможность туннелирования трафика.
+        traffic_selector: Регистер правил обработки трафика целевых адресов, если задан включает селектирование трафика.
 
     Returns:
         Фабрику создающую настроенный по заданным параметрам экземпляр `overtun.ProxyProtocol`.
@@ -55,9 +57,19 @@ def make_protocol_factory(
         def __init__(self):
             # Интерфейс `overtune.intyperr.OutcomingFactory`
             async def outcoming_factory(_, target_address: Address) -> OutcomingTransport | None:
-                if outlet_address is not None:
-                    target_address = outlet_address
-                return await self._outcoming_factory(target_address)
+
+                def traffic_selector_(address: Address) -> TargetTraffic:
+                    if traffic_selector is not None:
+                        return traffic_selector(address)
+                    else:
+                        return TargetTraffic(rule=TrafficRule.TUNNEL)
+
+                traffic = traffic_selector_(target_address)
+                if traffic.rule != TrafficRule.DROP:
+                    if outlet_address is not None and traffic.rule == TrafficRule.TUNNEL:
+                        target_address = outlet_address
+                    return await self._outcoming_factory(target_address)
+                return None
 
             super().__init__(outcoming_factory=outcoming_factory)
 
@@ -84,6 +96,7 @@ async def create_outlet_server(
 async def create_proxy_server(
     address: Address,
     outlet_address: Address | None = None,
+    target_selector: TargetRegistry[TargetTraffic] | None = None,
     **kwargs: t.Any,
 ) -> asyncio.Server:
     """
@@ -92,9 +105,10 @@ async def create_proxy_server(
     Args:
          address: Сетевой адрес к которому привязывается прокси сервер.
          outlet_address: Адрес "выхода туннеля", если задан включает на сервере возможность туннелирования трафика.
+         target_selector: Регистр правил селектирования целевых адресов, если задан включает селектирование трафика.
          kwargs: Остальные именованные параметры, соответствуют параметрам `loop.create_server`.
 
     See Also:
          Для доп. информации смотрите описание `overtun.create_server`.
     """
-    return await create_server(address, make_protocol_factory(outlet_address), **kwargs)
+    return await create_server(address, make_protocol_factory(outlet_address, target_selector), **kwargs)

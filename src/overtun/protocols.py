@@ -175,7 +175,7 @@ class ProxyProtocol(Protocol):
 
     @staticmethod
     def _target_resolver(preamble: bytes, port: int = 443) -> tuple[Address, Buffer | None] | None:
-        """Определяет целевой адрес по TLS записе ."""
+        """Определяет целевой адрес по TLS записи."""
         if record := TLSRecord.load(preamble):
             if (
                 record.type == TLSRecord.Type.Handshake
@@ -232,5 +232,5 @@ class ProxyProtocol(Protocol):
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.exception(str(exc))
         else:
-            self.logger.debug(str(exc))
+            self.logger.warning(str(exc))
         self.transport.write_eof()

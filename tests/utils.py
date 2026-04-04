@@ -32,7 +32,7 @@ def make_protocol_factory(*args, bag: list[t.Any] | None = None, **kwargs):
     def wrapped_outcoming_factory(original_outcoming_factory):
         async def outcoming_factory(incoming: Transport, target: Address):
             outcoming = await original_outcoming_factory(incoming, target)
-            if bag is not None:
+            if bag is not None and outcoming is not None:
                 local = Address.parse(*incoming.get_extra_info("sockname")[:2])
                 bag.append((local, target))
             return outcoming
