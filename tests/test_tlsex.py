@@ -112,6 +112,7 @@ def client_hello_01():
         int(z, 16) for z in filter(lambda a: a, [z.strip() for z in sample.split(" ")])
     )
 
+
 def test_tls_parser(client_hello_00, client_hello_01):
     record = TLSRecord.load(client_hello_00)
     assert record.message.type == TLSMessage.Type.ClientHello

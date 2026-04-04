@@ -13,6 +13,13 @@ class Address(t.NamedTuple):
     host: str | IPv4Address | IPv6Address
     port: int
 
+    def __str__(self) -> str:
+        return (
+            f"[{self.host}]:{self.port}"
+            if isinstance(self.host, IPv6Address)
+            else f"{self.host}:{self.port}"
+        )
+
     @classmethod
     def parse(cls, s: str, port: int = None) -> t.Self:
         """Парсит адрес из строкового представления"""

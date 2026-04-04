@@ -4,10 +4,17 @@ import typing as t
 from asyncio import Transport
 from enum import Enum
 from logging import Logger
+from collections.abc import Buffer
 
 from tlsex import TLSRecord, TLSMessage, TLSExtension
 from tlsex.extensions import ServerName
-from .intyperr import OutcomingFactory, OutcomingTransport, ProtocolError
+from .intyperr import (
+    OutcomingFactory,
+    OutcomingTransport,
+    ProtocolError,
+    OutcomingForwarder,
+    TargetResolver,
+)
 from .primitives import Address
 
 
@@ -91,29 +98,33 @@ class ProxyProtocol(Protocol):
 
     def __init__(
         self,
-        outcoming_factory: OutcomingFactory | None = None,
         logger: Logger = None,
+        target_resolver: TargetResolver | None = None,
+        outcoming_factory: OutcomingFactory | None = None,
+        outcoming_forwarder: OutcomingForwarder | None = None,
     ) -> None:
+        """
+        Конструктор
+        Args:
+            logger:
+            target_resolver:
+            outcoming_factory: Фабрика исходящего соединения, интерфейс `overtune.intyperr.OutcomingFactory`
+            outcoming_forwarder:
+        """
         super().__init__(logger)
         self._buffer = b""
-
-        async def default_outcoming_factory(
-            incoming_transport: Transport,
-            target_address,
-        ) -> OutcomingTransport:
-            host, port = target_address
-            loop = asyncio.get_event_loop()
-            outcoming_transport, _ = await loop.create_connection(
-                lambda: OutcomingProtocol(incoming_transport), str(host), port
-            )
-            return outcoming_transport
-
-        self._outcoming_factory = outcoming_factory or default_outcoming_factory
+        self.__outcoming_factory = outcoming_factory or (
+            lambda _, target_address: self._outcoming_factory(target_address)
+        )
+        self.__outcoming_forwarder = outcoming_forwarder or (
+            lambda _, data: self._outcoming_forwarder(data)
+        )
+        self.__target_resolver = target_resolver or self._target_resolver
 
     def data_received(self, data: bytes):
         """Получены данные из входящего подключения."""
         if self.outcoming is not None:
-            self.forward_data(data)
+            self.__outcoming_forwarder(self.outcoming, data)
         else:
             self._buffer += data
             try:
@@ -142,19 +153,13 @@ class ProxyProtocol(Protocol):
                         if self.proxy_mode != ProxyMode.HTTP_CONNECT:
                             self.proxy_mode = ProxyMode.HTTPS_TRANSPARENT
                         if self.proxy_mode == ProxyMode.HTTPS_TRANSPARENT:
-                            if TLSExtension.Type.ServerName in tls.message.extensions:
-                                sni = t.cast(
-                                    ServerName, tls.message.extensions[TLSExtension.Type.ServerName]
-                                )
-                                target_address = Address.parse(sni.hostname, 443)
-                            else:
-                                raise ProtocolError("Cannot get target address")
+                            target_address, self._buffer = self.__target_resolver(tls, 443)
                         else:
                             target_address = self._target_address
                         self.transport.pause_reading()
                         # Получение входящих данных на паузу, пока не будет создано исходящеее соединение
                         self._outcoming_task = asyncio.create_task(
-                            self._outcoming_factory(self.transport, target_address)
+                            self.__outcoming_factory(self.transport, target_address)
                         )
                         self._outcoming_task.add_done_callback(
                             lambda task: self._outcoming_done(task, target_address)
@@ -162,32 +167,63 @@ class ProxyProtocol(Protocol):
             except Exception as exc:
                 self._handle_error(exc)
 
-    def forward_data(self, data: bytes):
-        """Отправляет данные в исходящее подключение."""
-        self.outcoming.write(data)
-
     def connection_lost(self, exc):
         """Транспорт отключен."""
         if self.outcoming is not None and not self.outcoming.is_closing():
             self.outcoming.close()
         self.transport.close()
 
+    @staticmethod
+    def _target_resolver(preamble: bytes, port: int = 443) -> tuple[Address, Buffer | None] | None:
+        """Определяет целевой адрес по TLS записе ."""
+        if record := TLSRecord.load(preamble):
+            if (
+                record.type == TLSRecord.Type.Handshake
+                and record.message.type == TLSMessage.Type.ClientHello
+            ):
+                if TLSExtension.Type.ServerName in record.message.extensions:
+                    sni = t.cast(
+                        ServerName, record.message.extensions[TLSExtension.Type.ServerName]
+                    )
+                    return Address.parse(sni.hostname, port), preamble
+                else:
+                    raise ProtocolError("Cannot get target address")
+            else:
+                raise ProtocolError("Wrong TLS message type, excepted ClientHello")
+        return None
+
+    def _outcoming_forwarder(self, data: bytes):
+        """Отправляет данные в исходящее соединение."""
+        self.outcoming.write(data)
+
+    async def _outcoming_factory(self, target_address: Address) -> OutcomingTransport:
+        """Создает исходящее соединение."""
+        host, port = target_address
+        loop = asyncio.get_event_loop()
+        outcoming_transport, _ = await loop.create_connection(
+            lambda: OutcomingProtocol(self.transport), str(host), port
+        )
+        local_address = Address.parse(*self.transport.get_extra_info("peername")[:2])
+        self.logger.info(f"Connection from {local_address} to {target_address} established")
+        return outcoming_transport
+
     def _outcoming_done(
         self, task: asyncio.Task[OutcomingTransport], target_address: Address
     ) -> None:
         try:
+            local_address = Address.parse(*self.transport.get_extra_info("peername")[:2])
             try:
                 if outcoming := task.result():
                     self.outcoming = outcoming
                     if self._buffer:
                         data, self._buffer = self._buffer, b""
-                        self.forward_data(data)
+                        self.__outcoming_forwarder(self.outcoming, data)
                     self.transport.resume_reading()
                 else:
-                    raise ConnectionError(f"Taget address: {target_address} banned")
+                    raise ConnectionError(f"Connection to {target_address} banned by rule")
             except Exception as exc:
                 raise ConnectionResetError(
-                    f"Outcoming connection to {target_address} failed; {exc}"
+                    f"Connection from {local_address} to {target_address} failed; {exc}"
                 ) from exc
         except ConnectionError as exc:
             self._handle_error(exc)
