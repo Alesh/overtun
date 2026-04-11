@@ -23,7 +23,7 @@ class Address(t.NamedTuple):
 
     @classmethod
     def parse(cls, s: str, port: int = None) -> t.Self:
-        """Парсит адрес из строкового представления"""
+        """Парсит адрес из строкового представления."""
         try:
             if isinstance(s, str):
                 if s.startswith("["):
@@ -56,10 +56,38 @@ class Address(t.NamedTuple):
 
 
 class TrafficRule(int, Enum):
+    """
+    Правила перенаправления трафика запросов к целевому адресу.
+
+    Attributes:
+        DROP: Соединение сбрасывается, трафик не обрабатывается.
+        DIRECT: Перенаправление трафика напрямую к целевому адресу.
+        TUNNEL: Перенаправление трафика к целевому адресу через ткнель.
+    """
+
     DROP = 0
     DIRECT = 1
     TUNNEL = 2
 
+    @classmethod
+    def parse(cls, s: str) -> t.Self:
+        """Парсит правило из строкового представления."""
+        match s.upper():
+            case "DROP" | "0":
+                return TrafficRule.DROP
+            case "DIRECT" | "1":
+                return TrafficRule.DIRECT
+            case "TUNNEL" | "2":
+                return TrafficRule.TUNNEL
+            case _:
+                raise ValueError("Wrong value")
 
-class TargetTraffic(t.NamedTuple):
-    rule: TrafficRule
+
+class TargetDesc[D](t.NamedTuple):
+    """
+    Описание целевого ресурса
+    """
+
+    address: Address
+    traffic_rule: TrafficRule
+    extra_desc: D | None = None
