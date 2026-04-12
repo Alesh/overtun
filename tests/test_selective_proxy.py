@@ -6,9 +6,9 @@ from ipaddress import IPv4Address
 import httpx
 import pytest
 
-import overtun
+from overtun.servers import create_proxy, create_outlet
 from overtun.handlers import outlet_handler, proxy_handler
-from overtun import Address, TargetDesc, TrafficRule
+from overtun.primitives import Address, TargetDesc, TrafficRule
 from tests.utils import requirements_note, TEST_TRANSPARENT_REQUIREMENTS
 
 
@@ -23,32 +23,28 @@ async def selective_proxy(proxy_address, outlet_address):
                 return TargetDesc(address, TrafficRule.DROP)
 
     @contextlib.asynccontextmanager
-    async def selective_proxy_context(bag: list[t.Any] | None = None):
+    async def selective_proxy_context(secret_key: bytes, bag: list[t.Any] | None = None):
 
         class Handlers[A]:
             @staticmethod
-            def outlet_handler(
-                preamble: bytes, extra_args: A | None = None
-            ) -> tuple[Address | None, bytes] | None:
-                if result := outlet_handler(preamble, extra_args):
+            def outlet_handler(*args, **kwargs):
+                if result := outlet_handler(*args, **kwargs):
                     address, data = result
                     bag.append((outlet_address, address))
                     return address, data
                 return None
 
             @staticmethod
-            def proxy_handler(
-                preamble: bytes, extra_args: A | None = None
-            ) -> tuple[Address | None, bytes] | None:
-                if result := proxy_handler(preamble, extra_args):
+            def proxy_handler(*args, **kwargs):
+                if result := proxy_handler(*args, **kwargs):
                     address, data = result
                     bag.append((proxy_address, address))
                     return address, data
                 return None
 
-        outlet_server = await overtun.create_outlet(outlet_address, Handlers())
-        proxy_server = await overtun.create_proxy(
-            proxy_address, outlet_address, target_registry, handlers=Handlers()
+        outlet_server = await create_outlet(outlet_address, secret_key, Handlers())
+        proxy_server = await create_proxy(
+            proxy_address, outlet_address, secret_key, target_registry, handlers=Handlers()
         )
         async with outlet_server:
             await outlet_server.start_serving()
@@ -59,11 +55,11 @@ async def selective_proxy(proxy_address, outlet_address):
     return selective_proxy_context
 
 
-async def test_selective_server(selective_proxy, caplog):
+async def test_selective_server(selective_proxy, secret_key, caplog):
     bag = list()
     caplog.set_level(logging.WARNING)
 
-    async with selective_proxy(bag) as address:
+    async with selective_proxy(secret_key, bag) as address:
         # HTTP CONNECT PROXY
         async with httpx.AsyncClient(proxy="http://{}:{}".format(*address)) as client:
             resp = await client.get("https://mail.ru")

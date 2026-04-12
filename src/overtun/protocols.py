@@ -70,7 +70,7 @@ class OutcomingProtocol(BaseProtocol):
 
 class IncomingProtocol[D](BaseProtocol):
     """
-    Базовый протокол входящего поделючения к прокси серверу.
+    Базовый протокол входящего подключения к прокси серверу.
     """
 
     _outcoming_task: Task[Transport]
@@ -146,6 +146,7 @@ class OutletProtocol[A](IncomingProtocol):
 
     def __init__(
         self,
+        secret_key: bytes,
         handlers: HandlersModule[A] | None = None,
         extra_args: A | None = None,
         logger: Logger = None,
@@ -154,17 +155,19 @@ class OutletProtocol[A](IncomingProtocol):
         Конструктор:
 
         Args:
+            secret_key: Секретный ключ связывающий стороны тунеля.
             handlers: Обработчики преамбулы.
             extra_args: Дополнительные данные для обработчика преамбулы.
             logger: Логгер
         """
         super().__init__(logger)
+        self._secret_key = secret_key
         self._extra_args = extra_args
         self._handlers = handlers or default_handlers
 
     def preamble_received(self, data: bytes):
         """Получена преамбула для разбора."""
-        if result := self._handlers.outlet_handler(data, self._extra_args):
+        if result := self._handlers.outlet_handler(data, self._secret_key, self._extra_args):
             target_address, data = result
             if target_address:
                 self._outcoming_task = self.create_outcoming(target_address)
@@ -185,6 +188,7 @@ class ProxyProtocol[A, D](IncomingProtocol[D]):
     def __init__(
         self,
         outlet_address: Address | None = None,
+        secret_key: bytes | None = None,
         target_registry: Callable[[Address], TargetDesc[D] | None] | None = None,
         default_traffic_rule: TrafficRule = TrafficRule.DIRECT,
         handlers: HandlersModule[A] | None = None,
@@ -196,6 +200,7 @@ class ProxyProtocol[A, D](IncomingProtocol[D]):
 
         Args:
             outlet_address: Адрес аутлета, включает режим туннелирования.
+            secret_key: Секретный ключ связывающий стороны туннеля.
             target_registry: Регистр дополнительной информации о целевых ресурсах.
             default_traffic_rule: Правило по умолчанию для перенаправления трафика.
             handlers: Обработчики преамбулы.
@@ -211,14 +216,17 @@ class ProxyProtocol[A, D](IncomingProtocol[D]):
         )
         self._traffic_rule = default_traffic_rule
         self._outlet_address = outlet_address
+        self._secret_key = secret_key
         self._extra_args = extra_args
         self._handlers = handlers or default_handlers
 
     def preamble_received(self, data: bytes):
         """Получена преамбула для разбора."""
 
-        if result := self._handlers.proxy_handler(data, self._extra_args):
-            target_address, data = result
+        if result := self._handlers.proxy_handler(
+            data, self._outlet_address, self._secret_key, self._extra_args
+        ):
+            target_address, encoded_preamble = result
             if target_address:
                 remote_address = target_address
                 target_desc = self._target_registry(target_address)
@@ -227,6 +235,7 @@ class ProxyProtocol[A, D](IncomingProtocol[D]):
                     and self._outlet_address is not None
                 ):
                     remote_address = self._outlet_address
+                    data = encoded_preamble
                 elif target_desc.traffic_rule == TrafficRule.DROP:
                     remote_address = None
                 if remote_address is not None:

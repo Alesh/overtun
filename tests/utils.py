@@ -4,7 +4,7 @@ from asyncio import Transport
 from contextlib import contextmanager
 
 import overtun
-from overtun import Address
+from overtun.primitives import Address
 
 TEST_TRANSPARENT_REQUIREMENTS = """
 For this test/example, you need to enable the forwarding of outgoing traffic from 8443 to 10443, 

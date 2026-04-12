@@ -7,18 +7,19 @@ from tlsex.extensions import ServerName
 
 class HandlersModule[A](t.Protocol):
     """
-    Интерфейс модуля обработчиков преабулы.
+    Интерфейс модуля обработчиков преамбулы.
     """
 
     @staticmethod
     def outlet_handler(
-        preamble: bytes, extra_args: A | None = None
+        preamble: bytes, secret_key: bytes, extra_args: A | None = None
     ) -> tuple[Address | None, bytes] | None:
         """
         Обработчик преамбула входящего подключения к аутлету.
 
         Args:
-            preamble: Данные преамбулы
+            preamble: Данные преамбулы.
+            secret_key: Секретный ключ связывающий стороны туннеля.
             extra_args: Дополнительные данные для обработки преамбулы.
 
         Returns:
@@ -28,13 +29,18 @@ class HandlersModule[A](t.Protocol):
 
     @staticmethod
     def proxy_handler(
-        preamble: bytes, extra_args: A | None = None
+        preamble: bytes,
+        outlet_address: Address | None = None,
+        secret_key: bytes | None = None,
+        extra_args: A | None = None,
     ) -> tuple[Address | None, bytes] | None:
         """
         Обработчик преамбула входящего подключения к прокси.
 
         Args:
-            preamble: Данные преамбулы
+            preamble: Данные преамбулы.
+            outlet_address: Адрес аутлета, включает режим туннелирования.
+            secret_key: Секретный ключ связывающий стороны туннеля.
             extra_args: Дополнительные данные для обработки преамбулы.
 
         Returns:
@@ -43,13 +49,14 @@ class HandlersModule[A](t.Protocol):
         """
 
 
-def common_handler(preamble: bytes, _=None) -> tuple[Address | None, bytes] | None:
+def outlet_handler(
+    preamble: bytes, _secret_key: bytes, _extra_args=None
+) -> tuple[Address | None, bytes] | None:
     """
-    Обработчик преамбула входящего подключения к аутлету и прокси.
+    Обработчик преамбула входящего подключения к аутлету.
 
     Args:
-        preamble: Данные преамбулы
-        _: Дополнительных параметров для этой реализациинет
+        preamble: Данные преамбулы.
 
     Returns:
         `None` если полученных данных недостаточно для принятия решения.
@@ -62,13 +69,35 @@ def common_handler(preamble: bytes, _=None) -> tuple[Address | None, bytes] | No
             and tls.message.type == TLSMessage.Type.ClientHello
         ):
             address = None
-            if TLSExtension.Type.ServerName in tls.message.extensions:
-                sni = t.cast(ServerName, tls.message.extensions[TLSExtension.Type.ServerName])
-                address = Address.parse(sni.hostname, 443)
+            if sn := t.cast(ServerName, tls.message.extensions.get(TLSExtension.Type.ServerName)):
+                address = Address.parse(sn.hostname, 443)
             return address, preamble
     except ValueError:
         return None
 
 
-outlet_handler = common_handler
-proxy_handler = common_handler
+def proxy_handler(
+    preamble: bytes, _outlet_address= None, _secret_key=None, _extra_args=None
+) -> tuple[Address | None, bytes] | None:
+    """
+    Обработчик преамбула входящего подключения к прокси серверу.
+
+    Args:
+        preamble: Данные преамбулы.
+
+    Returns:
+        `None` если полученных данных недостаточно для принятия решения.
+        Кортеж из найденного адреса и данных преамбулы, которые могли быть модифицированы.
+    """
+    try:
+        if (
+            (tls := TLSRecord.load(preamble))
+            and tls.type == TLSRecord.Type.Handshake
+            and tls.message.type == TLSMessage.Type.ClientHello
+        ):
+            address = None
+            if sn := t.cast(ServerName, tls.message.extensions.get(TLSExtension.Type.ServerName)):
+                address = Address.parse(sn.hostname, 443)
+            return address, preamble
+    except ValueError:
+        return None

@@ -1,9 +1,10 @@
+import asyncio
 import contextlib
 
 import httpx
 import pytest
 
-import overtun
+from overtun.servers import create_proxy
 from tests.utils import requirements_note, TEST_TRANSPARENT_REQUIREMENTS
 
 
@@ -11,7 +12,7 @@ from tests.utils import requirements_note, TEST_TRANSPARENT_REQUIREMENTS
 async def simple_proxy(proxy_address):
     @contextlib.asynccontextmanager
     async def simple_proxy_context():
-        proxy_server = await overtun.create_proxy(proxy_address)
+        proxy_server = await create_proxy(proxy_address)
         async with proxy_server:
             await proxy_server.start_serving()
             yield proxy_address
