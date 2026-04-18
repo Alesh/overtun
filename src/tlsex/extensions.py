@@ -1,7 +1,7 @@
-import typing as t
 import functools
 import inspect
 import struct
+import typing as t
 from collections.abc import Buffer, Sized
 from enum import Enum
 
@@ -13,8 +13,8 @@ class UnknownExtension(Buffer, Sized):
 
     _mv: memoryview
 
-    def __init__(self, mv: memoryview):
-        assert mv.readonly
+    def __init__(self, buffer: Buffer):
+        mv = memoryview(buffer).toreadonly()
         (length,) = struct.unpack("!H", mv[2:4])
         self._mv = mv[: 4 + length]
 
@@ -22,7 +22,7 @@ class UnknownExtension(Buffer, Sized):
         return f"U/E[{''.join([f'{ch:02X}' for ch in self._mv[0:2]])}]"
 
     def __bytes__(self):
-        return self._mv.tobytes()
+        return bytes(self._mv)
 
     def __buffer__(self, flags, /):
         if flags & inspect.BufferFlags.WRITABLE:
@@ -139,8 +139,8 @@ class TLSExtension(UnknownExtension):
         """Тип расширения."""
         return TLSExtension.Type(self._mv[0:2])
 
-    @classmethod
-    def load(cls, mv: memoryview) -> t.Self:
+    @staticmethod
+    def load(mv: memoryview) -> UnknownExtension:
         """Загружает TLS расширение и создает экземпляр класса."""
         if mv[0:2] in TLSExtension.Type:
             match TLSExtension.Type(mv[0:2]):
@@ -153,7 +153,7 @@ class TLSExtension(UnknownExtension):
                 case TLSExtension.Type.SupportedVersions:
                     return SupportedVersions(mv)
                 case _:
-                    return cls(mv)
+                    return TLSExtension(mv)
         return Grease(mv)
 
 
@@ -189,13 +189,26 @@ class ServerName(TLSExtension):
         a, b = self.__hostname
         return bytes(self._mv[a:b]).decode("utf8")
 
+    @classmethod
+    def create(cls, hostname: str) -> t.Self:
+        hostname = str(hostname).encode("utf8")
+        body = b"\0" + struct.pack("!H", len(hostname)) + hostname
+        body = struct.pack("!H", len(body)) + body
+        return ServerName(
+            memoryview(TLSExtension.Type.ServerName + struct.pack("!H", len(body)) + body)
+        )
+
 
 class SupportedGroups(TLSExtension):
     @functools.cached_property
-    def curves(self) -> tuple[int, ...]:
+    def _curves(self) -> tuple[int, ...]:
         return sum(
             tuple(struct.unpack("!H", self._mv[n : n + 2]) for n in range(6, len(self), 2)), ()
         )
+
+    @functools.cached_property
+    def curves(self) -> tuple[int, ...]:
+        return tuple(cv for cv in self._curves if (cv & 0x0F0F) != 0x0A0A)
 
 
 class EcPointFormats(TLSExtension):
@@ -206,5 +219,6 @@ class EcPointFormats(TLSExtension):
 
 class SupportedVersions(TLSExtension):
     @functools.cached_property
-    def versions(self) -> tuple[int, ...]:
-        return tuple(struct.unpack("!H", self._mv[n : n + 2])[0] for n in range(5, len(self), 2))
+    def versions(self) -> tuple[bytes, ...]:
+        values = tuple(struct.unpack("!H", self._mv[n : n + 2])[0] for n in range(5, len(self), 2))
+        return tuple(struct.pack("!H", v) for v in values if (v & 0x0F0F) != 0x0A0A)

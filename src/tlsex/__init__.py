@@ -1,12 +1,12 @@
+import functools
 import inspect
 import struct
 import typing as t
-import functools
 from collections.abc import Buffer, Sized
 from enum import Enum
 
-from .messages import TLSMessage
 from .extensions import TLSExtension
+from .messages import TLSMessage
 
 all = ["TLSRecord", "TLSMessage", "TLSExtension"]
 
