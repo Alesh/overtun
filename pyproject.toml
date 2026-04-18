@@ -1,0 +1,46 @@
+[build-system]
+requires = ["uv_build>=0.10.9,<0.11.0"]
+build-backend = "uv_build"
+
+[project]
+name = "OverTun"
+version = "0.1.0"
+description = "`OverTun` Components for creating proxies"
+readme = "README.md"
+authors = [
+    { name = "Alesh", email = "alexey.poryadin@xmail.ru" }
+]
+
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv.build-backend]
+namespace = true
+
+[dependency-groups]
+dev = [
+    "httpx",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-env",
+    "ruff",
+]
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "ERROR"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+minversion = "6.0"
+testpaths = [
+    "tests",
+]
+addopts = [
+    "-ra",
+    "-q",
+]
+
+[tool.ruff]
+line-length = 110
+indent-width = 4
+target-version = "py312"
