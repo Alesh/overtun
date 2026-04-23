@@ -69,7 +69,7 @@ class TLSMessage:
         return bytes(self._mv[6:38])
 
     @staticmethod
-    def load(mv: memoryview) -> 'TLSMessage':
+    def load(mv: memoryview) -> "TLSMessage":
         """Загружает TLS сообщение и создает экземпляр класса."""
         mv = mv[5:]
         if mv[0:1] in TLSMessage.Type:
@@ -122,7 +122,7 @@ class CommonHello(TLSMessage):
         # extensions = []
         body = b"".join([bytes(extension) for extension in extensions])
         body = struct.pack("!H", len(body)) + body
-        new = self.__class__.load(memoryview(bytes(self)[0:ptr+5] + body))
+        new = self.__class__.load(memoryview(bytes(self)[0 : ptr + 5] + body))
         return new
 
 

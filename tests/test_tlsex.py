@@ -50,9 +50,13 @@ def test_create_ServerName(chromium_preamble):
     server_name = record.message.extensions.get(TLSExtension.Type.ServerName)
     assert bytes(server_name) == bytes(ServerName.create("www.google.com"))
 
+
 def test_rebuild_ClientHello(chromium_preamble):
     record = TLSRecord.load(chromium_preamble)
-    if record.type == TLSRecord.Type.Handshake and record.message.type == TLSMessage.Type.ClientHello:
+    if (
+        record.type == TLSRecord.Type.Handshake
+        and record.message.type == TLSMessage.Type.ClientHello
+    ):
         client_hello = t.cast(ClientHello, record.message)
     else:
         assert False

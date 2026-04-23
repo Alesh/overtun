@@ -140,7 +140,7 @@ class TLSExtension(UnknownExtension):
         return TLSExtension.Type(self._mv[0:2])
 
     @staticmethod
-    def load(mv: memoryview) -> UnknownExtension:
+    def load(mv: memoryview) -> t.Union["TLSExtension", UnknownExtension]:
         """Загружает TLS расширение и создает экземпляр класса."""
         if mv[0:2] in TLSExtension.Type:
             match TLSExtension.Type(mv[0:2]):
