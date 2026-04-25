@@ -6,7 +6,7 @@ import typing as t
 import httpx
 import pytest
 
-from overtun.primitives import Address, TargetRule
+from overtun.primitives import Address, TargetRule, Tunnel
 from overtun.protocols.special import EgressProtocol, ProxyProtocol
 from overtun.utils import default_logger
 
@@ -47,15 +47,15 @@ async def start_special_proxy(proxy_address, egress_address, secret_key, rule_re
         protocol.create_outgoing_connection = create_outgoing_connection
         return protocol
 
+    tunnel = Tunnel(egress_address, secret_key)
+
     @contextlib.asynccontextmanager
     async def server_context(accum: list[t.Any]):
         loop = asyncio.get_event_loop()
         address, port = proxy_address
         proxy_server = await loop.create_server(
             lambda: mocks_protocol(
-                ProxyProtocol(
-                    rule_register=rule_register, egress_address=egress_address, secret_key=secret_key
-                ),
+                ProxyProtocol(rule_register=rule_register, tunnel=tunnel),
                 accum,
             ),
             str(address),
@@ -64,7 +64,7 @@ async def start_special_proxy(proxy_address, egress_address, secret_key, rule_re
         async with proxy_server:
             address, port = egress_address
             egress_server = await loop.create_server(
-                lambda: mocks_protocol(EgressProtocol(secret_key), accum), str(address), port
+                lambda: mocks_protocol(EgressProtocol(tunnel), accum), str(address), port
             )
             async with egress_server:
                 await proxy_server.start_serving()

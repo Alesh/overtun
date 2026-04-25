@@ -11,7 +11,6 @@ from tlsex.extensions import ServerName
 from tlsex.messages import ClientHello
 
 
-
 class ProtocolError(Error):
     """Protocol error."""
 

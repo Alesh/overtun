@@ -67,3 +67,35 @@ class TargetRule(int, Enum):
         except ValueError:
             raise ValueError(f"Invalid target rule: {value}")
         return cls(value)
+
+
+class Tunnel[E]:
+    """
+    Interface for tunnel negotiation and building.
+
+    Args:
+        egress_address: Egress server address for tunneling.
+        secret_key: Secret key for tunnel negotiation.
+    """
+
+    def __init__(self, egress_address: Address, secret_key: bytes) -> None:
+        self.__egress_address = egress_address
+        self.__secret_key = secret_key
+
+    @property
+    def egress_address(self) -> Address:
+        """Egress server address."""
+        return self.__egress_address
+
+    @property
+    def secret_key(self) -> bytes:
+        """Secret key for tunnel negotiation"""
+        return self.__secret_key
+
+    def seal_traffic_preamble(self, preamble: bytes, extra: E = None) -> bytes:
+        """Seals the tunnel negotiation and construction parameters in the TLS preamble."""
+        return preamble
+
+    def unseal_traffic_preamble(self, preamble: bytes) -> bytes | None:
+        """Unseals the TLS preamble and retrieves the tunnel negotiation and construction parameters."""
+        return preamble
