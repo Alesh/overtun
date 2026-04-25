@@ -1,5 +1,6 @@
 import re
 import typing as t
+from enum import Enum
 from ipaddress import AddressValueError, IPv4Address, IPv6Address
 
 DOMAIN_RE = re.compile(r"(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}$)")
@@ -37,10 +38,11 @@ class Address(t.NamedTuple):
 
         host = s
         try:
-            if pos := s.rfind("]") + 1:  # IP6
-                if pos < len(s) and s[pos] == ":":
-                    host, port = s[:pos], s[pos + 1 :]
-                return normalize(IPv6Address(host[1:-1]), port)
+            if s[0] == "[":
+                if (pos := s.rfind("]") + 1) and pos > 1:  # IP6
+                    if pos < len(s) and s[pos] == ":":
+                        host, port = s[:pos], s[pos + 1 :]
+                    return normalize(IPv6Address(host[1:-1]), port)
             if (parts := s.rsplit(":")) and len(parts) == 2:
                 host, port = parts
             if re.match(DOMAIN_RE, host):
@@ -51,3 +53,17 @@ class Address(t.NamedTuple):
         except (AttributeError, TypeError, AddressValueError) as exc:
             msg = "Wrong host value"
             raise ValueError(msg) from exc
+
+
+class TargetRule(int, Enum):
+    DROP = 0
+    DIRECT = 1
+    TUNNEL = 2
+
+    @classmethod
+    def parse(cls, value: int | str) -> t.Self:
+        try:
+            value = [tr.name for tr in TargetRule].index(value.upper())
+        except ValueError:
+            raise ValueError(f"Invalid target rule: {value}")
+        return cls(value)

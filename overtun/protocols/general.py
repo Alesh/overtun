@@ -11,6 +11,7 @@ from tlsex.extensions import ServerName
 from tlsex.messages import ClientHello
 
 
+
 class ProtocolError(Error):
     """Protocol error."""
 
@@ -195,7 +196,7 @@ class IncomingProtocol(BaseProtocol):
             self.__outgoing = task.result()
             if self._buffer:
                 self._buffer, buffer = b"", self._buffer
-                self.outgoing.write(buffer)
+                self._send_preamble(buffer)
             remote_address = get_peer_address(self.outgoing)
             msg = f"Connection from {local_address} to {target_address} established"
             if target_address != remote_address:
@@ -208,3 +209,6 @@ class IncomingProtocol(BaseProtocol):
             else:
                 self.logger.warning(msg)
             self.transport.write_eof()
+
+    def _send_preamble(self, preamble: bytes):
+        self.outgoing.write(preamble)
