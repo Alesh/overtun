@@ -1,5 +1,6 @@
 import functools
 import struct
+import typing as t
 from collections.abc import Sequence
 from enum import Enum
 
@@ -30,7 +31,7 @@ class TLSRecord(_Entity):
             (length,) = struct.unpack("!H", buffer[3:5])
             if len(buffer) == length + 5:
                 super().__init__(memoryview(buffer).toreadonly())
-                self.__messages = TLSMessage.make_collections(self._mv[5:])
+                self.__messages = TLSMessage.collections_from_buffer(self._mv[5:])
                 return
         msg = "Buffer is not complete"
         raise BufferError(msg)
@@ -49,3 +50,12 @@ class TLSRecord(_Entity):
     def _messages(self) -> Sequence[TLSMessage]:
         """All messages in the record."""
         return tuple(self.__messages)
+
+    def rebuild_with_message(self, messages: Sequence[TLSMessage]) -> t.Self:
+        """
+        Rebuilds the record by replace the extension list.
+        """
+        body = b""
+        for msg in messages:
+            body += bytes(msg)
+        return self.__class__(bytes(self._mv[:3]) + struct.pack("!H", len(body)) + body)

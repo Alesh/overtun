@@ -50,7 +50,7 @@ class TLSMessage(_Entity):
         return bytes(self._mv[6:38])
 
     @classmethod
-    def make_collections(cls, buffer: Buffer, /) -> tuple[t.Self, ...]:
+    def collections_from_buffer(cls, buffer: Buffer, /) -> tuple[t.Self, ...]:
         """Build a collection of TLSMessage objects from a buffer."""
         ptr = 0
         messages = []
@@ -66,6 +66,23 @@ class TLSMessage(_Entity):
                 ptr += length + 4
         return tuple(messages)
 
+    @property
+    def _extensions(self) -> Sequence[Extension]:
+        return []
+
+    def rebuild_with_extensions(self, extensions: Sequence[Extension]) -> t.Self:
+        """
+        Rebuilds the message by replace the extension list.
+        """
+        ptr = 38 + 1 + self._mv[38]
+        (cs_length,) = struct.unpack("!H", self._mv[ptr : ptr + 2])
+        ptr = ptr + 2 + cs_length + 2  # Смешение к началу списка расширений
+        body = b""
+        for ex in extensions:
+            body += bytes(ex)
+        body = bytes(self._mv[4:ptr]) + struct.pack("!H", len(body)) + body
+        return self.__class__(memoryview(bytes(self._mv[0:2]) + struct.pack("!H", len(body)) + body))
+
 
 class ClientHello(TLSMessage):
     """Client Hello message."""
@@ -75,11 +92,11 @@ class ClientHello(TLSMessage):
         # (SessionID offset) + (SessionID length field) + (SessionID size)
         ptr = 38 + 1 + mv[38]  # Offset past SessionID
         (cs_length,) = struct.unpack("!H", mv[ptr : ptr + 2])
-        self.__ciphers = Cipher.make_collections(self._mv[ptr + 2 : ptr + 2 + cs_length])
+        self.__ciphers = Cipher.collections_from_buffer(self._mv[ptr + 2 : ptr + 2 + cs_length])
         # + (Cipher Suites length field) + (Cipher Suites size) + CompressionMethods
         ptr = ptr + 2 + cs_length + 2  # Offset past Cipher Suites and CompressionMethods
         (ex_length,) = struct.unpack("!H", mv[ptr : ptr + 2])
-        self.__extensions = TLSExtension.make_collections(self._mv[ptr + 2 : ptr + 2 + ex_length])
+        self.__extensions = TLSExtension.collections_from_buffer(self._mv[ptr + 2 : ptr + 2 + ex_length])
 
     @functools.cached_property
     def _cipher_suites(self) -> Sequence[Cipher]:
@@ -98,3 +115,45 @@ class ClientHello(TLSMessage):
     def extensions(self) -> Sequence[TLSExtension]:
         """Offered TLS extensions (recognized only)."""
         return tuple(ex for ex in self._extensions if isinstance(ex, TLSExtension))
+
+
+def replace_extension(
+    message: TLSMessage, replacement: TLSExtension, *replacements: TLSExtension
+) -> tuple[Sequence[Extension], tuple[int, ...]]:
+    """Replaces extensions. A list with modified values and replacement positions is returned."""
+    poss = []
+    extensions = [*message._extensions]
+    for replacement in [replacement, *replacements]:
+        for N in range(0, len(extensions)):
+            extension = extensions[N]
+            if isinstance(extension, TLSExtension) and extension.type == replacement.type:
+                poss.append(N)
+                extensions[N] = replacement
+                break
+        else:
+            poss.append(-1)
+    return tuple(extensions), tuple(poss)
+
+
+def delete_extensions(
+    message: TLSMessage, type: TLSExtension.Type | bytes, *types: TLSExtension.Type | bytes
+) -> tuple[Sequence[Extension], tuple[int, ...]]:
+    """Deletes extensions. A list with modified values and delete positions is returned."""
+
+    poss = []
+    extensions = [*message._extensions]
+    for ext_type in [type, *types]:
+        for N in range(0, len(extensions)):
+            extension = extensions[N]
+            # if isinstance(ext_type, TLSExtension.Type):
+            #     if isinstance(extension, TLSExtension) and extension.type == ext_type:
+            #         poss.append(N)
+            #         extensions[N] = None
+            #         break
+            if bytes(extension._mv[0:2]) == bytes(ext_type[0:2]):
+                poss.append(N)
+                extensions[N] = None
+                break
+        else:
+            poss.append(-1)
+    return tuple([e for e in extensions if e is not None]), tuple(poss)

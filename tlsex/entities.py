@@ -41,7 +41,7 @@ class Cipher(_Entity):
         return number
 
     @classmethod
-    def make_collections(cls, buffer: Buffer, /) -> tuple["Cipher", ...]:
+    def collections_from_buffer(cls, buffer: Buffer, /) -> tuple["Cipher", ...]:
         """Build a collections of Cipher descriptors from a buffer."""
         mv = memoryview(buffer).toreadonly()
         return tuple(cls(mv[n : n + 2]) for n in range(0, len(mv), 2))

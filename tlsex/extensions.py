@@ -81,6 +81,9 @@ class TLSExtension(Extension):
         EncryptedClientHello = b"\xfe\x0d"
         RenegotiationInfo = b"\xff\x01"
 
+        def __bytes__(self):
+            return self.value
+
     def __str__(self) -> str:
         return f"{self.type.name}{super().__str__()[-6:]}"
 
@@ -90,7 +93,7 @@ class TLSExtension(Extension):
         return TLSExtension.Type(self._mv[0:2])
 
     @classmethod
-    def make_collections(cls, buffer: Buffer, /) -> tuple[Extension, ...]:
+    def collections_from_buffer(cls, buffer: Buffer, /) -> tuple[Extension, ...]:
         """Build a collections of Extension objects from a buffer."""
         ptr = 0
         extensions = []
@@ -137,3 +140,10 @@ class ServerName(TLSExtension):
     def hostname(self) -> str:
         """Target hostname."""
         return self._hostnames[0]
+
+    @classmethod
+    def create(cls, hostname: str) -> "ServerName":
+        hostname = hostname.encode("utf8")
+        body = b"\0" + struct.pack("!H", len(hostname)) + hostname
+        body = struct.pack("!H", len(body)) + body
+        return cls(memoryview(cls.Type.ServerName.value + struct.pack("!H", len(body)) + body))
