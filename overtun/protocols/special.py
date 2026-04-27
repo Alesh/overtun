@@ -16,28 +16,22 @@ class EgressProtocol(IncomingProtocol):
 
     Args:
         tunnel: Instance of Tunnel interface.
-        allow_http_connect: If True, allows HTTP CONNECT requests in addition to TLS.
         logger: Logger instance.
     """
 
-    def __init__(
-        self, tunnel: Tunnel, *, allow_http_connect: bool = False, logger: Logger | None = None
-    ) -> None:
+    def __init__(self, tunnel: Tunnel, *, logger: Logger | None = None) -> None:
         super().__init__(logger=logger)
-        self._allow_http_connect = allow_http_connect
         self._tunnel = tunnel
 
     def http_connect_handler(self, preamble: bytes) -> None:
         """Handle an HTTP CONNECT request."""
-        if self._allow_http_connect:
-            super().http_connect_handler(preamble)
-        else:
-            self.transport.write(b"HTTP/1.0 405 Method Not Allowed\r\n\r\n")
-            self.transport.close()
+        self.transport.write(b"HTTP/1.0 405 Method Not Allowed\r\n\r\n")
+        self.transport.close()
 
     def tls_session_started(self, preamble: bytes) -> None:
         """TLS session started."""
         if preamble := self._tunnel.unseal_traffic_preamble(preamble):
+            self._buffer = preamble
             super().tls_session_started(preamble)
 
 

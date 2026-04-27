@@ -2,22 +2,26 @@ import asyncio
 import contextlib
 import logging
 import typing as t
+from collections.abc import Callable
+from ipaddress import IPv4Address
 
 import httpx
 import pytest
 
-from overtun.primitives import Address, TargetRule, Tunnel
+from overtun.primitives import Address, TargetRule
 from overtun.protocols.special import EgressProtocol, ProxyProtocol
 from overtun.utils import default_logger
+from tests.samples import Tunnel
 
-default_logger.setLevel(logging.WARNING)
+default_logger.setLevel(logging.DEBUG)
 
 
 @pytest.fixture
 def rule_register():
     return {
         Address("ok.ru", 443): (TargetRule.DROP, None),
-        Address("vk.ru", 443): (TargetRule.TUNNEL, None),
+        Address("vk.ru", 443): (TargetRule.TUNNEL, 0),
+        Address("ya.ru", 443): (TargetRule.TUNNEL, 1),
     }
 
 
@@ -34,12 +38,29 @@ async def start_special_proxy(proxy_address, egress_address, secret_key, rule_re
 
     def mocks_protocol(protocol, accum):
         orig_method = protocol.create_outgoing_connection
+        orig_write: Callable[[bytes], None] | None = None
+        preamble = True
+
+        def outgoing_write(remote_address, host, data):
+            nonlocal orig_write, preamble
+            if data[0] == 0x16 and preamble:
+                if IPv4Address(remote_address[0]).is_global:
+                    remote_address = host, remote_address[1]
+                accum.append((remote_address, "found" if host.encode() in data else "masked", host))
+                preamble = False
+            if orig_write is not None:
+                orig_write(data)
 
         async def create_outgoing_connection(address: Address):
+            nonlocal orig_write
             try:
-                result = await orig_method(address)
-                accum.append((protocol.transport.get_extra_info("sockname"), address, True))
-                return result
+                outgoing_transport = await orig_method(address)
+                local_address = protocol.transport.get_extra_info("sockname")
+                remote_address = outgoing_transport.get_extra_info("peername")
+                accum.append((local_address, address, True))
+                orig_write = outgoing_transport.write
+                outgoing_transport.write = lambda data: outgoing_write(remote_address, address.host, data)
+                return outgoing_transport
             except Exception as exc:
                 accum.append((protocol.transport.get_extra_info("sockname"), address, type(exc)))
                 raise
@@ -90,9 +111,20 @@ async def test_special_proxy(start_special_proxy, accum):
             resp = await client.get("https://vk.ru")
             assert resp.status_code == 302
 
+        async with httpx.AsyncClient(proxy="http://{}:{}".format(*address)) as client:
+            resp = await client.get("https://ya.ru")
+            assert resp.status_code == 302
+
     assert accum == [
         (("127.0.0.1", 10443), Address("mail.ru", 443), True),
+        (("mail.ru", 443), "found", "mail.ru"),
         (("127.0.0.1", 10443), Address("ok.ru", 443), ConnectionResetError),
         (("127.0.0.1", 10443), Address("vk.ru", 443), True),
+        (("127.0.0.1", 20443), "found", "vk.ru"),
         (("127.0.0.1", 20443), Address("vk.ru", 443), True),
+        (("vk.ru", 443), "found", "vk.ru"),
+        (("127.0.0.1", 10443), Address("ya.ru", 443), True),
+        (("127.0.0.1", 20443), "masked", "ya.ru"),
+        (("127.0.0.1", 20443), Address("ya.ru", 443), True),
+        (("ya.ru", 443), "found", "ya.ru"),
     ]
